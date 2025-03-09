@@ -24,7 +24,7 @@ type Manager struct {
 	versionedModules map[uint64]map[string]sdkmodule.AppModule
 	// uniqueModuleVersions is a mapping of module name -> module consensus
 	// version -> the range of app versions this particular module operates
-	// over. The first element in the array represent the fromVersion and the
+	// over. The first element in the array represents the fromVersion and the
 	// last the toVersion (this is inclusive).
 	uniqueModuleVersions map[string]map[uint64][2]uint64
 	allModules           []sdkmodule.AppModule
@@ -386,7 +386,7 @@ func (m *Manager) checkUpgradeSchedule() error {
 	return nil
 }
 
-// assertMatchingModules performs a sanity check that the basic module manager
+// AssertMatchingModules performs a sanity check that the basic module manager
 // contains all the same modules present in the module manager
 func (m *Manager) AssertMatchingModules(basicModuleManager sdkmodule.BasicManager) error {
 	for _, module := range m.allModules {
