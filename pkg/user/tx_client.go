@@ -81,7 +81,7 @@ func (e *ExecutionError) Error() string {
 	return fmt.Sprintf("tx execution failed with code %d: %s", e.Code, e.ErrorLog)
 }
 
-// WithGasMultiplier is a functional option allows to configure the gas multiplier.
+// WithGasMultiplier is a functional option that allows configuring the gas multiplier.
 func WithGasMultiplier(multiplier float64) Option {
 	return func(c *TxClient) {
 		c.gasMultiplier = multiplier
@@ -652,10 +652,7 @@ func QueryMinimumGasPrice(ctx context.Context, grpcConn *grpc.ClientConn) (float
 	}
 
 	// return the highest value of the two
-	if networkMinPrice > localMinPrice {
-		return networkMinPrice, nil
-	}
-	return localMinPrice, nil
+	return max(localMinPrice, networkMinPrice), nil
 }
 
 func QueryNetworkMinGasPrice(ctx context.Context, grpcConn *grpc.ClientConn) (float64, error) {

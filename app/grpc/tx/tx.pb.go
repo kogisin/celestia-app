@@ -30,7 +30,7 @@ const _ = proto.GoGoProtoPackageIsVersion3 // please upgrade the proto package
 
 // TxStatusRequest is the request type for the TxStatus gRPC method.
 type TxStatusRequest struct {
-	// this is the hex encoded transaction hash (should be 64 bytes long)
+	// this is the hex encoded transaction hash (should be 64 characters long representing 32 bytes)
 	TxId string `protobuf:"bytes,1,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"`
 }
 
@@ -80,7 +80,7 @@ type TxStatusResponse struct {
 	Index  uint32 `protobuf:"varint,2,opt,name=index,proto3" json:"index,omitempty"`
 	// execution_code is returned when the transaction has been committed
 	// and returns whether it was successful or errored. A non zero
-	// execution code indicated an error.
+	// execution code indicates an error.
 	ExecutionCode uint32 `protobuf:"varint,3,opt,name=execution_code,json=executionCode,proto3" json:"execution_code,omitempty"`
 	// error log for failed transactions.
 	Error string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
