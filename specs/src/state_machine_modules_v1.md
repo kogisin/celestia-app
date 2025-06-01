@@ -5,9 +5,9 @@ The modules used in app version 1 are:
 ## `celestia-app` modules
 
 - [blob](https://github.com/celestiaorg/celestia-app/blob/main/x/blob/README.md)
-- [blobstream](https://github.com/celestiaorg/celestia-app/blob/main/x/blobstream/README.md)
+- [blobstream](https://github.com/celestiaorg/celestia-app/tree/06f24f5dbe48c29964e1d8cfb030cffd90797ded/x/blobstream)
 - [mint](https://github.com/celestiaorg/celestia-app/blob/main/x/mint/README.md)
-- [paramfilter](https://github.com/celestiaorg/celestia-app/blob/main/x/paramfilter/README.md)
+- [paramfilter](https://github.com/celestiaorg/celestia-app/blob/e293a5ed5ed8e7d35d609bf12a9754fc45463a39/x/paramfilter/README.md)
 - [tokenfilter](https://github.com/celestiaorg/celestia-app/blob/main/x/tokenfilter/README.md)
 
 ## `cosmos-sdk` modules
@@ -22,9 +22,12 @@ The modules used in app version 1 are:
 - [feegrant](https://github.com/celestiaorg/cosmos-sdk/blob/v1.14.0-sdk-v0.46.11/x/feegrant/spec/README.md)
 - [genutil](https://github.com/celestiaorg/cosmos-sdk/tree/v1.14.0-sdk-v0.46.11/x/genutil) (no spec)
 - [gov](https://github.com/celestiaorg/cosmos-sdk/blob/v1.14.0-sdk-v0.46.11/x/gov/spec/README.md)
-- [ibc](https://github.com/cosmos/ibc/blob/f990a7f96eb7753c2fabbd49ed50b64d3a807629/README.md)
 - [params](https://github.com/celestiaorg/cosmos-sdk/blob/v1.14.0-sdk-v0.46.11/x/params/spec/README.md)
 - [slashing](https://github.com/celestiaorg/cosmos-sdk/blob/v1.14.0-sdk-v0.46.11/x/slashing/spec/README.md)
 - [staking](https://github.com/celestiaorg/cosmos-sdk/blob/v1.14.0-sdk-v0.46.11/x/staking/spec/README.md)
-- [transfer](https://github.com/cosmos/ibc/blob/f990a7f96eb7753c2fabbd49ed50b64d3a807629/spec/app/ics-020-fungible-token-transfer/README.md)
 - [vesting](https://github.com/celestiaorg/cosmos-sdk/tree/v1.14.0-sdk-v0.46.11/x/auth/vesting) (no spec)
+
+## Third-party modules
+
+- [ibc](https://github.com/cosmos/ibc/blob/f990a7f96eb7753c2fabbd49ed50b64d3a807629/README.md)
+- [transfer](https://github.com/cosmos/ibc/blob/f990a7f96eb7753c2fabbd49ed50b64d3a807629/spec/app/ics-020-fungible-token-transfer/README.md)

@@ -7,6 +7,13 @@ The target audience for this guide is maintainers of this repo. In general, the 
     1. If the release candidate is not satisfactory, go back to step 1
     1. If the release candidate is satisfactory, create an official release
 
+## Notes
+
+1. The v3.x.x binary used by the multiplexer is hard-coded in the Makefile (until [#4721](https://github.com/celestiaorg/celestia-app/issues/4721) is resolved). In order to include a code change to the v3.x branch in celestia-app v4.x, you must:
+    1. Create a release of celestia-app v3.x.x
+    1. Modify the Makefile to point to the new version
+    1. Create a release of celestia-app v4.x.x
+
 ## Release Candidate
 
 ### Creating a release candidate
@@ -36,7 +43,7 @@ Follow the [creating a release candidate](#creating-a-release-candidate) section
 - The release notes should contain an **Upgrade Notice** section with notable changes for node operators or library consumers.
 - The release notes section should contain a link to <https://github.com/celestiaorg/celestia-app/blob/main/docs/release-notes/release-notes.md> where we capture breaking changes
 
-### After creating the release:
+### After creating the release
 
 1. Wait until CI passes on the release and verify that prebuilt binaries were attached to the release.
 1. Create a PR to bump the celestia-app dependency in [celestia-node](https://github.com/celestiaorg/celestia-node).
@@ -44,7 +51,7 @@ Follow the [creating a release candidate](#creating-a-release-candidate) section
 ## Mainnet Release
 
 Follow the [creating a release candidate](#creating-a-release-candidate) section with the following considerations:
+
 - The version tag should not include the `-rc`, `-arabica`, or `-mocha` suffix.
 - Toggle off the **Set as a pre-release** checkbox.
 - Toggle on the **Set as the latest release** checkbox.
-

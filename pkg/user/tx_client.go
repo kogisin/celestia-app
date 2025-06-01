@@ -11,27 +11,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/celestiaorg/celestia-app/v3/app/grpc/gasestimation"
-
-	"github.com/celestiaorg/go-square/v2/share"
+	sdkmath "cosmossdk.io/math"
+	abci "github.com/cometbft/cometbft/abci/types"
+	"github.com/cometbft/cometbft/rpc/core"
 	"github.com/cosmos/cosmos-sdk/client"
+	tmservice "github.com/cosmos/cosmos-sdk/client/grpc/cmtservice"
 	nodeservice "github.com/cosmos/cosmos-sdk/client/grpc/node"
-	"github.com/cosmos/cosmos-sdk/client/grpc/tmservice"
+	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	sdktx "github.com/cosmos/cosmos-sdk/types/tx"
 	paramtypes "github.com/cosmos/cosmos-sdk/x/params/types/proposal"
-	abci "github.com/tendermint/tendermint/abci/types"
-	"github.com/tendermint/tendermint/rpc/core"
 	"google.golang.org/grpc"
 
-	"github.com/celestiaorg/celestia-app/v3/app"
-	"github.com/celestiaorg/celestia-app/v3/app/encoding"
-	"github.com/celestiaorg/celestia-app/v3/app/grpc/tx"
-	"github.com/celestiaorg/celestia-app/v3/pkg/appconsts"
-	"github.com/celestiaorg/celestia-app/v3/x/blob/types"
-	"github.com/celestiaorg/celestia-app/v3/x/minfee"
+	"github.com/celestiaorg/go-square/v2/share"
+
+	"github.com/celestiaorg/celestia-app/v4/app/encoding"
+	"github.com/celestiaorg/celestia-app/v4/app/grpc/gasestimation"
+	"github.com/celestiaorg/celestia-app/v4/app/grpc/tx"
+	"github.com/celestiaorg/celestia-app/v4/app/params"
+	"github.com/celestiaorg/celestia-app/v4/pkg/appconsts"
+	"github.com/celestiaorg/celestia-app/v4/x/blob/types"
+	minfeetypes "github.com/celestiaorg/celestia-app/v4/x/minfee/types"
 )
 
 const (
@@ -130,15 +132,26 @@ func WithEstimatorService(conn *grpc.ClientConn) Option {
 	}
 }
 
+// WithAdditionalCoreEndpoints adds additional core endpoints to the TxClient.
+// For transaction submission, the client will attempt to use the primary endpoint
+// and the first two additional endpoints provided via this option.
+func WithAdditionalCoreEndpoints(conns []*grpc.ClientConn) Option {
+	return func(c *TxClient) {
+		c.conns = append(c.conns, conns...)
+	}
+}
+
 // TxClient is an abstraction for building, signing, and broadcasting Celestia transactions
 // It supports multiple accounts. If none is specified, it will
 // try to use the default account.
 // TxClient is thread-safe.
 type TxClient struct {
 	mtx      sync.Mutex
+	cdc      codec.Codec
 	signer   *Signer
 	registry codectypes.InterfaceRegistry
-	grpc     *grpc.ClientConn
+	// list of core endpoints for tx submission (primary + additionals)
+	conns []*grpc.ClientConn
 	// how often to poll the network for confirmation of a transaction
 	pollTime time.Duration
 	// defaultGasPrice is the price used if no price is provided
@@ -153,6 +166,7 @@ type TxClient struct {
 
 // NewTxClient returns a new signer using the provided keyring
 func NewTxClient(
+	cdc codec.Codec,
 	signer *Signer,
 	conn *grpc.ClientConn,
 	registry codectypes.InterfaceRegistry,
@@ -171,21 +185,26 @@ func NewTxClient(
 	if err != nil {
 		return nil, err
 	}
-
 	txClient := &TxClient{
 		signer:              signer,
 		registry:            registry,
-		grpc:                conn,
+		conns:               []*grpc.ClientConn{conn},
 		pollTime:            DefaultPollTime,
 		defaultGasPrice:     appconsts.DefaultMinGasPrice,
 		defaultAccount:      records[0].Name,
 		defaultAddress:      addr,
 		txTracker:           make(map[string]txInfo),
+		cdc:                 cdc,
 		gasEstimationClient: gasestimation.NewGasEstimatorClient(conn),
 	}
 
 	for _, opt := range options {
 		opt(txClient)
+	}
+
+	// Sanity check to ensure we don't have more than 3 connections
+	if len(txClient.conns) > 3 {
+		txClient.conns = txClient.conns[:3]
 	}
 
 	return txClient, nil
@@ -209,7 +228,6 @@ func SetupTxClient(
 	}
 
 	chainID := resp.SdkBlock.Header.ChainID
-	appVersion := resp.SdkBlock.Header.Version.App
 
 	records, err := keys.List()
 	if err != nil {
@@ -238,12 +256,12 @@ func SetupTxClient(
 	}
 	options = append([]Option{WithDefaultGasPrice(minPrice)}, options...)
 
-	signer, err := NewSigner(keys, encCfg.TxConfig, chainID, appVersion, accounts...)
+	signer, err := NewSigner(keys, encCfg.TxConfig, chainID, accounts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}
 
-	return NewTxClient(signer, conn, encCfg.InterfaceRegistry, options...)
+	return NewTxClient(encCfg.Codec, signer, conn, encCfg.InterfaceRegistry, options...)
 }
 
 // SubmitPayForBlob forms a transaction from the provided blobs, signs it, and submits it to the chain.
@@ -298,7 +316,10 @@ func (client *TxClient) BroadcastPayForBlobWithAccount(ctx context.Context, acco
 		return nil, err
 	}
 
-	return client.broadcastTx(ctx, txBytes, account)
+	if len(client.conns) > 1 {
+		return client.broadcastMulti(ctx, txBytes, account)
+	}
+	return client.broadcastTx(ctx, client.conns[0], txBytes, account)
 }
 
 // SubmitTx forms a transaction from the provided messages, signs it, and submits it to the chain. TxOptions
@@ -347,7 +368,7 @@ func (client *TxClient) BroadcastTx(ctx context.Context, msgs []sdktypes.Msg, op
 	if gasLimit == 0 {
 		if !hasUserSetFee {
 			// add at least 1utia as fee to builder as it affects gas calculation.
-			txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdktypes.NewInt(1))))
+			txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdkmath.NewInt(1))))
 		}
 		gasLimit, err = client.estimateGas(ctx, txBuilder)
 		if err != nil {
@@ -358,7 +379,7 @@ func (client *TxClient) BroadcastTx(ctx context.Context, msgs []sdktypes.Msg, op
 
 	if !hasUserSetFee {
 		fee := int64(math.Ceil(appconsts.DefaultMinGasPrice * float64(gasLimit)))
-		txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdktypes.NewInt(fee))))
+		txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdkmath.NewInt(fee))))
 	}
 
 	account, _, err = client.signer.signTransaction(txBuilder)
@@ -371,11 +392,14 @@ func (client *TxClient) BroadcastTx(ctx context.Context, msgs []sdktypes.Msg, op
 		return nil, err
 	}
 
-	return client.broadcastTx(ctx, txBytes, account)
+	if len(client.conns) > 1 {
+		return client.broadcastMulti(ctx, txBytes, account)
+	}
+	return client.broadcastTx(ctx, client.conns[0], txBytes, account)
 }
 
-func (client *TxClient) broadcastTx(ctx context.Context, txBytes []byte, signer string) (*sdktypes.TxResponse, error) {
-	txClient := sdktx.NewServiceClient(client.grpc)
+func (client *TxClient) broadcastTx(ctx context.Context, conn *grpc.ClientConn, txBytes []byte, signer string) (*sdktypes.TxResponse, error) {
+	txClient := sdktx.NewServiceClient(conn)
 	resp, err := txClient.BroadcastTx(
 		ctx,
 		&sdktx.BroadcastTxRequest{
@@ -411,6 +435,58 @@ func (client *TxClient) broadcastTx(ctx context.Context, txBytes []byte, signer 
 	return resp.TxResponse, nil
 }
 
+// broadcastMulti broadcasts the transaction to multiple connections concurrently
+// and returns the response from the first successful broadcast.
+func (client *TxClient) broadcastMulti(ctx context.Context, txBytes []byte, signer string) (*sdktypes.TxResponse, error) {
+	respCh := make(chan *sdktypes.TxResponse, 1)
+	errCh := make(chan error, len(client.conns))
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(len(client.conns))
+
+	for _, conn := range client.conns {
+		go func(conn *grpc.ClientConn) {
+			defer wg.Done()
+
+			resp, err := client.broadcastTx(ctx, conn, txBytes, signer)
+			if err != nil {
+				select {
+				case errCh <- err:
+				case <-ctx.Done():
+				}
+				return
+			}
+
+			// On first successful response, send it and cancel others
+			select {
+			case respCh <- resp:
+				cancel()
+			case <-ctx.Done():
+			}
+		}(conn)
+	}
+
+	// Wait for all attempts to finish
+	wg.Wait()
+	close(respCh)
+	close(errCh)
+
+	// Return first successful response, if any
+	if resp, ok := <-respCh; ok {
+		return resp, nil
+	}
+
+	// Otherwise, return the first error encountered
+	errs := make([]error, 0, len(errCh))
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+	return nil, errors.Join(errs...)
+}
+
 // pruneTxTracker removes transactions from the local tx tracker that are older than 10 minutes
 func (client *TxClient) pruneTxTracker() {
 	for hash, txInfo := range client.txTracker {
@@ -424,7 +500,7 @@ func (client *TxClient) pruneTxTracker() {
 // hash. It will continually loop until the context is cancelled, the tx is found or an error
 // is encountered.
 func (client *TxClient) ConfirmTx(ctx context.Context, txHash string) (*TxResponse, error) {
-	txClient := tx.NewTxClient(client.grpc)
+	txClient := tx.NewTxClient(client.conns[0])
 
 	pollTicker := time.NewTicker(client.pollTime)
 	defer pollTicker.Stop()
@@ -533,7 +609,7 @@ func (client *TxClient) EstimateGasPriceAndUsage(
 	}
 
 	// add at least 1utia as fee to builder as it affects gas calculation.
-	txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdktypes.NewInt(1))))
+	txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdkmath.NewInt(1))))
 
 	_, _, err = client.signer.signTransaction(txBuilder)
 	if err != nil {
@@ -572,7 +648,7 @@ func (client *TxClient) EstimateGasPrice(ctx context.Context, priority gasestima
 
 func (client *TxClient) estimateGas(ctx context.Context, txBuilder client.TxBuilder) (uint64, error) {
 	// add at least 1utia as fee to builder as it affects gas calculation.
-	txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdktypes.NewInt(1))))
+	txBuilder.SetFeeAmount(sdktypes.NewCoins(sdktypes.NewCoin(appconsts.BondDenom, sdkmath.NewInt(1))))
 
 	_, _, err := client.signer.signTransaction(txBuilder)
 	if err != nil {
@@ -629,7 +705,7 @@ func (client *TxClient) checkAccountLoaded(ctx context.Context, account string) 
 		return fmt.Errorf("retrieving address from keyring: %w", err)
 	}
 	// FIXME: have a less trusting way of getting the account number and sequence
-	accNum, sequence, err := QueryAccount(ctx, client.grpc, client.registry, addr)
+	accNum, sequence, err := QueryAccount(ctx, client.conns[0], client.registry, addr)
 	if err != nil {
 		return fmt.Errorf("querying account %s: %w", account, err)
 	}
@@ -639,7 +715,10 @@ func (client *TxClient) checkAccountLoaded(ctx context.Context, account string) 
 func (client *TxClient) getAccountNameFromMsgs(msgs []sdktypes.Msg) (string, error) {
 	var addr sdktypes.AccAddress
 	for _, msg := range msgs {
-		signers := msg.GetSigners()
+		signers, _, err := client.cdc.GetMsgV1Signers(msg)
+		if err != nil {
+			return "", fmt.Errorf("getting signers from message: %w", err)
+		}
 		if len(signers) != 1 {
 			return "", fmt.Errorf("only one signer per transaction supported, got %d", len(signers))
 		}
@@ -688,7 +767,7 @@ func QueryMinimumGasPrice(ctx context.Context, grpcConn *grpc.ClientConn) (float
 	if err != nil {
 		return 0, err
 	}
-	localMinPrice := localMinCoins.AmountOf(app.BondDenom).MustFloat64()
+	localMinPrice := localMinCoins.AmountOf(params.BondDenom).MustFloat64()
 
 	networkMinPrice, err := QueryNetworkMinGasPrice(ctx, grpcConn)
 	if err != nil {
@@ -708,7 +787,7 @@ func QueryMinimumGasPrice(ctx context.Context, grpcConn *grpc.ClientConn) (float
 func QueryNetworkMinGasPrice(ctx context.Context, grpcConn *grpc.ClientConn) (float64, error) {
 	paramsClient := paramtypes.NewQueryClient(grpcConn)
 	// NOTE: that we don't prove that this is the correct value
-	paramResponse, err := paramsClient.Params(ctx, &paramtypes.QueryParamsRequest{Subspace: minfee.ModuleName, Key: string(minfee.KeyNetworkMinGasPrice)})
+	paramResponse, err := paramsClient.Params(ctx, &paramtypes.QueryParamsRequest{Subspace: minfeetypes.ModuleName, Key: string(minfeetypes.KeyNetworkMinGasPrice)})
 	if err != nil {
 		return 0, fmt.Errorf("querying params module: %w", err)
 	}

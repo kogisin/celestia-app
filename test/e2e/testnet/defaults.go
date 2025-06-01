@@ -10,7 +10,7 @@ var DefaultResources = Resources{
 }
 
 const (
-	TxsimVersion = "v3.3.1"
+	TxsimVersion = "v4.0.0-rc1"
 	MB           = 1000 * 1000
 	GB           = 1000 * MB
 	MiB          = 1024 * 1024

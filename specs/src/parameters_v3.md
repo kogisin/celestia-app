@@ -59,7 +59,7 @@ hardcoded in the application or they are blocked by the `x/paramfilter` module.
 | mint.DisinflationRate                         | 0.10 (10%)                                  | The rate at which the inflation rate decreases each year.                                                                           | False                     |
 | mint.InitialInflationRate                     | 0.08 (8%)                                   | The inflation rate the network starts at.                                                                                           | False                     |
 | mint.TargetInflationRate                      | 0.015 (1.5%)                                | The inflation rate that the network aims to stabilize at.                                                                           | False                     |
-| packetforwardmiddleware.FeePercentage          | 0                                           | % of the forwarded packet amount which will be subtracted and distributed to the community pool.                                    | True                      |
+| packetforwardmiddleware.FeePercentage         | 0                                           | % of the forwarded packet amount which will be subtracted and distributed to the community pool.                                    | True                      |
 | slashing.DowntimeJailDuration                 | 1 min                                       | Duration of time a validator must stay jailed.                                                                                      | True                      |
 | slashing.MinSignedPerWindow                   | 0.75 (75%)                                  | The percentage of SignedBlocksWindow that must be signed not to get jailed.                                                         | True                      |
 | slashing.SignedBlocksWindow                   | 5000                                        | The range of blocks used to count for downtime.                                                                                     | True                      |
@@ -74,4 +74,4 @@ hardcoded in the application or they are blocked by the `x/paramfilter` module.
 
 Note: none of the mint module parameters are governance modifiable because they have been converted into hardcoded constants. See the x/mint README.md for more details.
 
-[icaAllowMessages]: https://github.com/rootulp/celestia-app/blob/8caa5807df8d15477554eba953bd056ae72d4503/app/ica_host.go#L3-L18
+[icaAllowMessages]: https://github.com/celestiaorg/celestia-app/blob/e5d5ac6732c55150ea3573e17bec162fe836e0c6/app/ica_host.go

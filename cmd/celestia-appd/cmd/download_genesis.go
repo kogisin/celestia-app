@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/cosmos/cosmos-sdk/server"
@@ -81,8 +80,8 @@ func getChainIDOrDefault(args []string) string {
 
 // isKnownChainID returns true if the chainID is known.
 func isKnownChainID(chainID string) bool {
-	knownChainIDs := getKeys(chainIDToSha256)
-	return slices.Contains(knownChainIDs, chainID)
+	_, ok := chainIDToSha256[chainID]
+	return ok
 }
 
 func chainIDs() string {
@@ -90,7 +89,7 @@ func chainIDs() string {
 }
 
 // downloadFile will download a URL to a local file.
-func downloadFile(filepath string, url string) error {
+func downloadFile(filepath, url string) error {
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
