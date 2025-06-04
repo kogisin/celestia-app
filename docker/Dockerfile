@@ -41,8 +41,6 @@ COPY . .
 
 RUN uname -a &&\
     CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    OVERRIDE_MAX_SQUARE_SIZE=${MAX_SQUARE_SIZE} \
-    OVERRIDE_UPGRADE_HEIGHT_DELAY=${UPGRADE_HEIGHT_DELAY} \
     make build-standalone
 
 # Stage 2: Create a minimal image to run the celestia-appd binary
@@ -54,7 +52,7 @@ FROM ${RUNTIME_IMAGE} AS runtime
 # Ref: https://github.com/hexops/dockerfile/blob/main/README.md#do-not-use-a-uid-below-10000
 ARG UID=10001
 ARG USER_NAME=celestia
-ENV CELESTIA_APP_HOME=/home/${USER_NAME}/.celestia-appd
+ENV CELESTIA_APP_HOME=/home/${USER_NAME}/.celestia-app
 # hadolint ignore=DL3018
 RUN apk update && apk add --no-cache \
     bash \
