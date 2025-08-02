@@ -6,6 +6,7 @@ import (
 
 	"cosmossdk.io/log"
 	confixcmd "cosmossdk.io/tools/confix/cmd"
+	"github.com/celestiaorg/celestia-app/v6/app"
 	"github.com/cometbft/cometbft/cmd/cometbft/commands"
 	tmcli "github.com/cometbft/cometbft/libs/cli"
 	dbm "github.com/cosmos/cosmos-db"
@@ -22,8 +23,6 @@ import (
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 	kitlog "github.com/go-kit/log"
 	"github.com/spf13/cobra"
-
-	"github.com/celestiaorg/celestia-app/v4/app"
 )
 
 const (
@@ -42,7 +41,7 @@ const (
 func NewRootCmd() *cobra.Command {
 	// we "pre"-instantiate the application for getting the injected/configured encoding configuration
 	// note, this is not necessary when using app wiring, as depinject can be directly used.
-	opts := simtestutil.NewAppOptionsWithFlagHome(app.DefaultNodeHome)
+	opts := simtestutil.NewAppOptionsWithFlagHome(app.NodeHome)
 	tempApp := app.New(log.NewNopLogger(), dbm.NewMemDB(), nil, 0, opts)
 	encodingConfig := tempApp.GetEncodingConfig()
 
@@ -54,7 +53,7 @@ func NewRootCmd() *cobra.Command {
 		WithInput(os.Stdin).
 		WithAccountRetriever(types.AccountRetriever{}).
 		WithBroadcastMode(flags.BroadcastSync).
-		WithHomeDir(app.DefaultNodeHome).
+		WithHomeDir(app.NodeHome).
 		WithViper(app.EnvPrefix)
 
 	rootCommand := &cobra.Command{
@@ -85,15 +84,7 @@ func NewRootCmd() *cobra.Command {
 				return err
 			}
 
-			if command.Flags().Changed(FlagLogToFile) {
-				// optionally log to file by replacing the default logger with a file logger
-				err = replaceLogger(command)
-				if err != nil {
-					return err
-				}
-			}
-
-			return nil
+			return replaceLogger(command)
 		},
 		SilenceUsage: true,
 	}
@@ -121,7 +112,7 @@ func initRootCommand(rootCommand *cobra.Command, capp *app.App) {
 
 	rootCommand.AddCommand(
 		InitCmd(capp),
-		genutilcli.Commands(capp.GetTxConfig(), capp.BasicManager, app.DefaultNodeHome),
+		genutilcli.Commands(capp.GetTxConfig(), capp.BasicManager, app.NodeHome),
 		tmcli.NewCompletionCmd(rootCommand, true),
 		debugCmd,
 		confixcmd.ConfigCommand(),
@@ -138,20 +129,9 @@ func initRootCommand(rootCommand *cobra.Command, capp *app.App) {
 
 	modifyRootCommand(rootCommand)
 
-	// find start command
-	startCmd, _, err := rootCommand.Find([]string{"start"})
-	if err != nil {
-		panic(fmt.Errorf("failed to find start command: %w", err))
-	}
-	startCmdRunE := startCmd.RunE
-
-	// Add the BBR check to the start command
-	startCmd.RunE = func(cmd *cobra.Command, args []string) error {
-		if err := checkBBR(cmd); err != nil {
-			return err
-		}
-
-		return startCmdRunE(cmd, args)
+	// Add hooks run prior to the start command
+	if err := addPreStartHooks(rootCommand, checkAndUpdateMinGasPrices, checkBBR); err != nil {
+		panic(fmt.Errorf("failed to add pre-start hooks: %w", err))
 	}
 }
 
@@ -184,6 +164,9 @@ func replaceLogger(cmd *cobra.Command) error {
 	}
 
 	sctx := server.GetServerContextFromCmd(cmd)
-	sctx.Logger = log.NewLogger(kitlog.NewSyncWriter(file))
+	sctx.Logger, err = server.CreateSDKLogger(sctx, kitlog.NewSyncWriter(file))
+	if err != nil {
+		return fmt.Errorf("failed to create logger: %w", err)
+	}
 	return server.SetCmdServerContext(cmd, sctx)
 }

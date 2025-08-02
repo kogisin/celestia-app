@@ -7,14 +7,13 @@ import (
 	"time"
 
 	"cosmossdk.io/math"
+	"github.com/celestiaorg/celestia-app/v6/test/util/testnode"
+	"github.com/celestiaorg/celestia-app/v6/x/mint/client/cli"
+	mint "github.com/celestiaorg/celestia-app/v6/x/mint/types"
 	tmcli "github.com/cometbft/cometbft/libs/cli"
 	"github.com/cosmos/cosmos-sdk/client/flags"
 	clitestutil "github.com/cosmos/cosmos-sdk/testutil/cli"
 	"github.com/stretchr/testify/suite"
-
-	"github.com/celestiaorg/celestia-app/v4/test/util/testnode"
-	"github.com/celestiaorg/celestia-app/v4/x/mint/client/cli"
-	mint "github.com/celestiaorg/celestia-app/v4/x/mint/types"
 )
 
 type IntegrationTestSuite struct {
@@ -47,7 +46,7 @@ func (s *IntegrationTestSuite) textArgs() []string {
 
 // TestGetCmdQueryInflationRate tests that the CLI query command for inflation
 // rate returns the correct value. This test assumes that the initial inflation
-// rate is 0.08.
+// rate is 0.0536 (as defined in CIP-29).
 func (s *IntegrationTestSuite) TestGetCmdQueryInflationRate() {
 	testCases := []struct {
 		name string

@@ -35,9 +35,9 @@ node            |  |                               |  |
 
 ### From source
 
-1. [Install Go](https://go.dev/doc/install) 1.23.6
+1. [Install Go](https://go.dev/doc/install) 1.24.4
 1. Clone this repo
-1. Install the celestia-appd binary. This installs a "multiplexer" binary that will also download embedded binaries for the latest celestia-app v3.x.x release.
+1. Install the celestia-appd binary. This installs a "multiplexer" binary that will also download embedded binaries for the latest celestia-app v3.x.x and v4.x.x release.
 
     ```shell
     make install
@@ -46,9 +46,6 @@ node            |  |                               |  |
 ### Prebuilt binary
 
 If you'd rather not install from source, you can download a prebuilt binary from the [releases](https://github.com/celestiaorg/celestia-app/releases) page.
-
-> [!WARNING]
-> The v4.x.x prebuilt binaries do not support the multiplexer so they can't be used to upgrade from v3 to v4. They can only be used in standalone mode once a chain has been upgraded to v4. To upgrade from v3 to v4, you must install from source.
 
 1. Navigate to the latest release on <https://github.com/celestiaorg/celestia-app/releases>.
 1. Download the binary for your platform (e.g. `celestia-app_Linux_x86_64.tar.gz`) from the **Assets** section. Tip: if you're not sure what platform you're on, you can run `uname -a` and look for the operating system (e.g. `Linux`, `Darwin`) and architecture (e.g. `x86_64`, `arm64`).
@@ -97,8 +94,8 @@ make bbr-enable
 
 ### Environment variables
 
-| Variable            | Explanation                                  | Default value                                               | Required |
-|---------------------|----------------------------------------------|-------------------------------------------------------------|----------|
+| Variable            | Explanation                                  | Default value                                              | Required |
+|---------------------|----------------------------------------------|------------------------------------------------------------|----------|
 | `CELESTIA_APP_HOME` | Where the application files should be saved. | [`$HOME/.celestia-app`](https://pkg.go.dev/os#UserHomeDir) | Optional |
 
 ### Using celestia-appd
@@ -129,6 +126,16 @@ celestia-appd tx blob pay-for-blob 0x00010203040506070809 0x48656c6c6f2c20576f72
 	--yes
 ```
 
+### Join a public Celestia network
+
+For instructions on running a node on Celestia's public networks, refer to the
+[consensus node](https://docs.celestia.org/how-to-guides/consensus-node)
+guide in the docs.
+
+> [!NOTE]
+When connecting to a public network, you must download the correct
+genesis file. Please use the `celestia-appd download-genesis` command.
+
 ### Usage as a library
 
 If you import celestia-app as a Go module, you may need to add some Go module `replace` directives to avoid type incompatibilities. Please see the `replace` directive in [go.mod](./go.mod) for inspiration.
@@ -141,6 +148,26 @@ If you are running celestia-app in tests, you may want to override the `timeout_
 # Start celestia-appd with a one-second timeout commit.
 celestia-appd start --timeout-commit 1s
 ```
+
+## Server Architecture
+
+celestia-app and celestia-core start multiple servers to handle different types of network communication and requests. Here's an overview of each server and their default addresses:
+
+### Celestia-Core (CometBFT) Servers
+
+| Server   | Default Address         | Configuration               | Purpose                                                                                               |
+|----------|-------------------------|-----------------------------|-------------------------------------------------------------------------------------------------------|
+| **RPC**  | `tcp://127.0.0.1:26657` | `config.toml` under `[rpc]` | HTTP/WebSocket API for blockchain queries, transaction submission, and real-time event subscriptions. |
+| **gRPC** | `tcp://127.0.0.1:9098`  | `config.toml` under `[rpc]` | gRPC API for broadcasting txs, querying blocks, and querying blobstream data                          |
+| **P2P**  | `tcp://0.0.0.0:26656`   | `config.toml` under `[p2p]` | Peer-to-peer networking layer for consensus, block synchronization, and mempool gossip.               |
+
+### Celestia-App (Cosmos SDK) Servers
+
+| Server       | Default Address                | Configuration                 | Purpose                                                                                                                                      |
+|--------------|--------------------------------|-------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| **gRPC**     | `localhost:9090`               | `app.toml` under `[grpc]`     | gRPC for application-specific queries. Provides access to Cosmos SDK modules (bank, governance, etc.) and Celestia-specific modules (blob).  |
+| **REST API** | `tcp://localhost:1317`         | `app.toml` under `[api]`      | RESTful HTTP API that proxies requests to the gRPC server via gRPC-gateway. Provides the same functionality as gRPC but over HTTP with JSON. |
+| **gRPC-Web** | *Uses REST API server address* | `app.toml` under `[grpc-web]` | Browser-compatible gRPC API that allows web applications to interact with the gRPC server.                                                   |
 
 ## Contributing
 
@@ -185,11 +212,22 @@ make proto-gen
 
 Package-specific READMEs aim to explain implementation details for developers that are contributing to these packages. The [specs](https://celestiaorg.github.io/celestia-app/) aim to explain the protocol as a whole for developers building on top of Celestia.
 
+### Dependency branches
+
+The source of truth for dependencies is the `go.mod` file but the table below describes the compatible branches for celestiaorg repos.
+
+| celestia-app | celestia-core      | cosmos-sdk                 |
+|--------------|--------------------|----------------------------|
+| `main`       | `main`             | `release/v0.50.x-celestia` |
+| `v4.x`       | `v0.38.x-celestia` | `release/v0.50.x-celestia` |
+| `v3.x`       | `v0.34.x-celestia` | `release/v0.46.x-celestia` |
+
 ## Audits
 
-| Date       | Auditor                                       | Version                                                                                                | Report                                                                                |
-|------------|-----------------------------------------------|--------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
-| 2023/9/15  | [Informal Systems](https://informal.systems/) | [v1.0.0-rc6](https://github.com/celestiaorg/celestia-app/releases/tag/v1.0.0-rc6)                      | [informal-systems.pdf](docs/audit/informal-systems.pdf)                               |
-| 2023/10/17 | [Binary Builders](https://binary.builders/)   | [v1.0.0-rc10](https://github.com/celestiaorg/celestia-app/releases/tag/v1.0.0-rc10)                    | [binary-builders.pdf](docs/audit/binary-builders.pdf)                                 |
-| 2024/7/1   | [Informal Systems](https://informal.systems/) | [v2.0.0-rc1](https://github.com/celestiaorg/celestia-app/releases/tag/v2.0.0-rc1)                      | [informal-systems-v2.pdf](docs/audit/informal-systems-v2.pdf)                         |
-| 2024/9/20  | [Informal Systems](https://informal.systems/) | [306c587](https://github.com/celestiaorg/celestia-app/commit/306c58745d135d31c3777a1af2f58d50adbd32c8) | [informal-systems-authored-blobs.pdf](docs/audit/informal-systems-authored-blobs.pdf) |
+| Date       | Auditor                                       | Version                                                                                                  | Report                                                                                |
+|------------|-----------------------------------------------|----------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|
+| 2023/9/15  | [Informal Systems](https://informal.systems/) | [v1.0.0-rc6](https://github.com/celestiaorg/celestia-app/releases/tag/v1.0.0-rc6)                        | [informal-systems.pdf](docs/audit/informal-systems.pdf)                               |
+| 2023/10/17 | [Binary Builders](https://binary.builders/)   | [v1.0.0-rc10](https://github.com/celestiaorg/celestia-app/releases/tag/v1.0.0-rc10)                      | [binary-builders.pdf](docs/audit/binary-builders.pdf)                                 |
+| 2024/7/1   | [Informal Systems](https://informal.systems/) | [v2.0.0-rc1](https://github.com/celestiaorg/celestia-app/releases/tag/v2.0.0-rc1)                        | [informal-systems-v2.pdf](docs/audit/informal-systems-v2.pdf)                         |
+| 2024/9/20  | [Informal Systems](https://informal.systems/) | [306c587](https://github.com/celestiaorg/celestia-app/commit/306c58745d135d31c3777a1af2f58d50adbd32c8)   | [informal-systems-authored-blobs.pdf](docs/audit/informal-systems-authored-blobs.pdf) |
+| 2025/6/24  | [Informal Systems](https://informal.systems/) | [139bad2](https://github.com/celestiaorg/celestia-core/commit/139bad235a379599670f30d5e28c637dde4bb17a)  | [informal-systems-recovery.pdf](docs/audit/informal-systems-recovery.pdf)             |

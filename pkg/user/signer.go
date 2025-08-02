@@ -6,21 +6,17 @@ import (
 	"fmt"
 
 	"cosmossdk.io/core/address"
+	"github.com/celestiaorg/celestia-app/v6/app/params"
+	"github.com/celestiaorg/celestia-app/v6/pkg/appconsts"
+	blobtypes "github.com/celestiaorg/celestia-app/v6/x/blob/types"
+	"github.com/celestiaorg/go-square/v2/share"
+	blobtx "github.com/celestiaorg/go-square/v2/tx"
 	"github.com/cosmos/cosmos-sdk/client"
 	addresscodec "github.com/cosmos/cosmos-sdk/codec/address"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
 	sdktypes "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/tx/signing"
 	authsigning "github.com/cosmos/cosmos-sdk/x/auth/signing"
-	"google.golang.org/grpc"
-
-	"github.com/celestiaorg/go-square/v2/share"
-	blobtx "github.com/celestiaorg/go-square/v2/tx"
-
-	"github.com/celestiaorg/celestia-app/v4/app/grpc/gasestimation"
-	"github.com/celestiaorg/celestia-app/v4/app/params"
-	"github.com/celestiaorg/celestia-app/v4/pkg/appconsts"
-	blobtypes "github.com/celestiaorg/celestia-app/v4/x/blob/types"
 )
 
 var defaultSignMode = signing.SignMode_SIGN_MODE_DIRECT
@@ -58,7 +54,35 @@ func NewSigner(keys keyring.Keyring, encCfg client.TxConfig, chainID string, acc
 		}
 	}
 
+	// pre-populate the address to account map.
+	// if the accounts do not yet exist, they will be lazily loaded during
+	// checkAccountLoaded.
+	if err := s.populateAddressToAccountMap(keys); err != nil {
+		return nil, fmt.Errorf("populating address to account map: %w", err)
+	}
+
 	return s, nil
+}
+
+// populateAddressToAccountMap retrieves keys from the keyring and maps their addresses to account names in the signer.
+func (s *Signer) populateAddressToAccountMap(kr keyring.Keyring) error {
+	records, err := kr.List()
+	if err != nil {
+		return fmt.Errorf("retrieving keys from keyring: %w", err)
+	}
+
+	for _, r := range records {
+		addr, err := r.GetAddress()
+		if err != nil {
+			return fmt.Errorf("getting address for record: %w", err)
+		}
+		addrStr, err := s.addressCodec.BytesToString(addr)
+		if err != nil {
+			return fmt.Errorf("converting address to string: %w", err)
+		}
+		s.addressToAccountMap[addrStr] = r.Name
+	}
+	return nil
 }
 
 // CreateTx forms a transaction from the provided messages and signs it.
@@ -99,7 +123,7 @@ func (s *Signer) CreatePayForBlobs(accountName string, blobs []*share.Blob, opts
 		return nil, 0, err
 	}
 
-	msg, err := blobtypes.NewMsgPayForBlobs(addr, appconsts.LatestVersion, blobs...)
+	msg, err := blobtypes.NewMsgPayForBlobs(addr, appconsts.Version, blobs...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -146,16 +170,22 @@ func (s *Signer) Account(name string) *Account {
 
 // AccountByAddress returns the account associated with the given address
 func (s *Signer) AccountByAddress(address sdktypes.AccAddress) *Account {
+	accountName := s.accountNameByAddress(address)
+	return s.accounts[accountName]
+}
+
+// accountNameByAddress returns the account name associated with the given address
+func (s *Signer) accountNameByAddress(address sdktypes.AccAddress) string {
 	addrStr, err := s.addressCodec.BytesToString(address)
 	if err != nil {
-		return nil
+		return ""
 	}
 
 	accountName, exists := s.addressToAccountMap[addrStr]
-	if !exists {
-		return nil
+	if exists {
+		return accountName
 	}
-	return s.accounts[accountName]
+	return ""
 }
 
 func (s *Signer) Accounts() []*Account {
@@ -323,49 +353,4 @@ func (s *Signer) txBuilder(msgs []sdktypes.Msg, opts ...TxOption) (client.TxBuil
 		builder = opt(builder)
 	}
 	return builder, nil
-}
-
-// QueryGasPrice takes a priority and an app gRPC client.
-// Returns the current network gas price corresponding to the provided priority.
-// More on the gas price estimation can be found in docs/architecture/adr-023-gas-used-and-gas-price-estimation.md
-// Deprecated: use TxClient.EstimateGasPrice
-func (s *Signer) QueryGasPrice(
-	ctx context.Context,
-	grpcClient *grpc.ClientConn,
-	priority gasestimation.TxPriority,
-) (float64, error) {
-	estimator := gasestimation.NewGasEstimatorClient(grpcClient)
-	gasPrice, err := estimator.EstimateGasPrice(
-		ctx,
-		&gasestimation.EstimateGasPriceRequest{TxPriority: priority},
-	)
-	if err != nil {
-		return 0, err
-	}
-	return gasPrice.EstimatedGasPrice, nil
-}
-
-// QueryGasUsedAndPrice takes a priority, an app gRPC client, and a transaction bytes.
-// Returns the current network gas price corresponding to the provided priority,
-// and the gas used estimation for the provided transaction bytes.
-// More on the gas estimation can be found in docs/architecture/adr-023-gas-used-and-gas-price-estimation.md
-// Deprecated: use TxClient.EstimateGasPriceAndUsage
-func (s *Signer) QueryGasUsedAndPrice(
-	ctx context.Context,
-	grpcClient *grpc.ClientConn,
-	priority gasestimation.TxPriority,
-	txBytes []byte,
-) (float64, uint64, error) {
-	estimator := gasestimation.NewGasEstimatorClient(grpcClient)
-	gasEstimation, err := estimator.EstimateGasPriceAndUsage(
-		ctx,
-		&gasestimation.EstimateGasPriceAndUsageRequest{
-			TxPriority: priority,
-			TxBytes:    txBytes,
-		},
-	)
-	if err != nil {
-		return 0, 0, err
-	}
-	return gasEstimation.EstimatedGasPrice, gasEstimation.EstimatedGasUsed, nil
 }
