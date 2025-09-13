@@ -31,7 +31,7 @@ func Build(txs [][]byte, _ uint64, maxSquareSize int, efn ExportFn) (square.Squa
 		blobTx, isBlobTx, err := blobtx.UnmarshalBlobTx(tx)
 		if isBlobTx {
 			if err != nil {
-				return nil, nil, fmt.Errorf("unmarshaling blob tx %d: %w", idx, err)
+				return nil, nil, fmt.Errorf("unmarshalling blob tx %d: %w", idx, err)
 			}
 			if builder.AppendBlobTx(blobTx) {
 				blobTxs = append(blobTxs, tx)
@@ -146,9 +146,9 @@ func OutOfOrderExport(b *square.Builder) (square.Square, error) {
 		}
 	}
 
-	// defensively check that the counter is always greater in share count than the pfbTxWriter.
+	// defensively check that the counter is always greater in share count than the pfbWriter.
 	if b.PfbCounter.Size() < pfbWriter.Count() {
-		return nil, fmt.Errorf("pfbCounter.Size() < pfbTxWriter.Count(): %d < %d", b.PfbCounter.Size(), pfbWriter.Count())
+		return nil, fmt.Errorf("pfbCounter.Size() < pfbWriter.Count(): %d < %d", b.PfbCounter.Size(), pfbWriter.Count())
 	}
 
 	// Write out the square

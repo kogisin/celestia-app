@@ -144,7 +144,6 @@ func Run(ctx context.Context, cfg BuilderConfig, dir string) error {
 		appCfg.Pruning = "everything" // we just want the last two states
 		appCfg.StateSync.SnapshotInterval = 0
 		cp := app.DefaultConsensusParams()
-
 		cp.Version.App = cfg.AppVersion // set the app version
 		gen = genesis.NewDefaultGenesis().
 			WithConsensusParams(cp).
@@ -326,10 +325,9 @@ func Run(ctx context.Context, cfg BuilderConfig, dir string) error {
 				return fmt.Errorf("failed to convert data from protobuf: %w", err)
 			}
 
-			block := state.MakeBlock(height, data, commit, nil, validatorAddr)
-			blockParts, err := block.MakePartSet(types.BlockPartSizeBytes)
+			block, blockParts, err := state.MakeBlock(height, data, commit, nil, validatorAddr)
 			if err != nil {
-				return fmt.Errorf("failed to make block part set: %w", err)
+				return fmt.Errorf("failed to make block: %w", err)
 			}
 			blockID := types.BlockID{
 				Hash:          block.Hash(),
@@ -471,8 +469,12 @@ func generateSquareRoutine(
 		if err != nil {
 			return err
 		}
+		msg, err := blobtypes.NewMsgPayForBlobs(account.Address().String(), 0, blob)
+		if err != nil {
+			return err
+		}
 
-		blobGas := blobtypes.DefaultEstimateGas([]uint32{uint32(cfg.BlockSize)})
+		blobGas := blobtypes.DefaultEstimateGas(msg)
 		fee := float64(blobGas) * appconsts.DefaultMinGasPrice * 2
 		tx, _, err := signer.CreatePayForBlobs(account.Name(), []*share.Blob{blob}, user.SetGasLimit(blobGas), user.SetFee(uint64(fee)))
 		if err != nil {

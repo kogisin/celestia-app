@@ -105,6 +105,7 @@ import (
 	"github.com/cosmos/ibc-go/modules/capability"
 	capabilitykeeper "github.com/cosmos/ibc-go/modules/capability/keeper"
 	capabilitytypes "github.com/cosmos/ibc-go/modules/capability/types"
+	ica "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts"
 	icahost "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/host"
 	icahostkeeper "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/host/keeper"
 	icahosttypes "github.com/cosmos/ibc-go/v8/modules/apps/27-interchain-accounts/host/types"
@@ -189,19 +190,20 @@ type App struct {
 	BasicManager  module.BasicManager
 	ModuleManager *module.Manager
 	configurator  module.Configurator
-	// timeoutCommit is used to override the default timeoutCommit. This is
+	// blockTime is used to override the default TimeoutHeightDelay. This is
 	// useful for testing purposes and should not be used on public networks
 	// (Arabica, Mocha, or Mainnet Beta).
-	timeoutCommit time.Duration
+	delayedPrecommitTimeout time.Duration
 }
 
 // New returns a reference to an uninitialized app. Callers must subsequently
-// call app.Info or app.InitChain to initialize the baseapp.
+// call app.Info or app.InitChain to initialize the baseapp. Setting
+// delayedPrecommitTimeout to 0 will result in using the default value.
 func New(
 	logger log.Logger,
 	db dbm.DB,
 	traceStore io.Writer,
-	timeoutCommit time.Duration,
+	delayedPrecommitTimeout time.Duration,
 	appOpts servertypes.AppOptions,
 	baseAppOptions ...func(*baseapp.BaseApp),
 ) *App {
@@ -218,12 +220,16 @@ func New(
 
 	govModuleAddr := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 
+	if delayedPrecommitTimeout == 0 {
+		delayedPrecommitTimeout = appconsts.DelayedPrecommitTimeout
+	}
+
 	app := &App{
-		BaseApp:       baseApp,
-		keys:          keys,
-		tkeys:         tkeys,
-		memKeys:       memKeys,
-		timeoutCommit: timeoutCommit,
+		BaseApp:                 baseApp,
+		keys:                    keys,
+		tkeys:                   tkeys,
+		memKeys:                 memKeys,
+		delayedPrecommitTimeout: delayedPrecommitTimeout,
 	}
 
 	// needed for migration from x/params -> module's ownership of own params
@@ -416,6 +422,7 @@ func New(
 		signal.NewAppModule(app.SignalKeeper),
 		minfee.NewAppModule(encodingConfig.Codec, app.MinFeeKeeper),
 		pfm{packetforward.NewAppModule(app.PacketForwardKeeper, app.GetSubspace(packetforwardtypes.ModuleName))},
+		icaModule{ica.NewAppModule(nil, &app.ICAHostKeeper)}, // The first argument is nil because the ICA controller is not enabled on celestia-app.
 		// ensure the light client module types are registered.
 		ibctm.NewAppModule(),
 		solomachine.NewAppModule(),
@@ -447,7 +454,6 @@ func New(
 		panic(err)
 	}
 
-	// RegisterUpgradeHandlers is used for registering any on-chain upgrades.
 	app.RegisterUpgradeHandlers() // must be called after module manager & configurator are initialized
 
 	// Initialize the KV stores for the base modules (e.g. params). The base modules will be included in every app version.
@@ -508,8 +514,7 @@ func (app *App) Info(req *abci.RequestInfo) (*abci.ResponseInfo, error) {
 		return nil, err
 	}
 
-	res.TimeoutInfo.TimeoutCommit = app.TimeoutCommit()
-	res.TimeoutInfo.TimeoutPropose = app.TimeoutPropose()
+	res.TimeoutInfo = app.TimeoutInfo()
 
 	return res, nil
 }
@@ -536,34 +541,34 @@ func (app *App) EndBlocker(ctx sdk.Context) (sdk.EndBlock, error) {
 		return sdk.EndBlock{}, err
 	}
 
-	shouldUpgrade, upgrade := app.SignalKeeper.ShouldUpgrade(ctx)
+	shouldUpgrade, signalUpgrade := app.SignalKeeper.ShouldUpgrade(ctx)
 	if shouldUpgrade {
 		// Version changes must be increasing. Downgrades are not permitted
-		if upgrade.AppVersion > currentVersion {
-			app.BaseApp.Logger().Info("upgrading app version", "current version", currentVersion, "new version", upgrade.AppVersion)
+		if signalUpgrade.AppVersion > currentVersion {
+			app.BaseApp.Logger().Info("upgrading app version", "current version", currentVersion, "new version", signalUpgrade.AppVersion)
 
+			upgradeHeight := signalUpgrade.UpgradeHeight + 1 // next block is performing the upgrade.
 			plan := upgradetypes.Plan{
-				Name:   fmt.Sprintf("v%d", upgrade.AppVersion),
-				Height: upgrade.UpgradeHeight + 1, // next block is performing the upgrade.
+				Name:   fmt.Sprintf("v%d", signalUpgrade.AppVersion),
+				Height: upgradeHeight,
 			}
 
 			if err := app.UpgradeKeeper.ScheduleUpgrade(ctx, plan); err != nil {
 				return sdk.EndBlock{}, fmt.Errorf("failed to schedule upgrade: %v", err)
 			}
 
-			if err := app.UpgradeKeeper.DumpUpgradeInfoToDisk(upgrade.UpgradeHeight, plan); err != nil {
+			if err := app.UpgradeKeeper.DumpUpgradeInfoToDisk(upgradeHeight, plan); err != nil {
 				return sdk.EndBlock{}, fmt.Errorf("failed to dump upgrade info to disk: %v", err)
 			}
 
-			if err := app.SetAppVersion(ctx, upgrade.AppVersion); err != nil {
+			if err := app.SetAppVersion(ctx, signalUpgrade.AppVersion); err != nil {
 				return sdk.EndBlock{}, err
 			}
 			app.SignalKeeper.ResetTally(ctx)
 		}
 	}
 
-	res.TimeoutInfo.TimeoutCommit = app.TimeoutCommit()
-	res.TimeoutInfo.TimeoutPropose = app.TimeoutPropose()
+	res.TimeoutInfo = app.TimeoutInfo()
 
 	return res, nil
 }
@@ -585,9 +590,7 @@ func (app *App) InitChainer(ctx sdk.Context, req *abci.RequestInitChain) (*abci.
 		return nil, err
 	}
 
-	res.TimeoutInfo.TimeoutCommit = app.TimeoutCommit()
-	res.TimeoutInfo.TimeoutPropose = app.TimeoutPropose()
-
+	res.TimeoutInfo = app.TimeoutInfo()
 	return res, nil
 }
 
@@ -756,9 +759,9 @@ func initParamsKeeper(appCodec codec.BinaryCodec, legacyAmino *codec.LegacyAmino
 	paramsKeeper.Subspace(distrtypes.ModuleName)
 	paramsKeeper.Subspace(slashingtypes.ModuleName)
 	paramsKeeper.Subspace(govtypes.ModuleName)
-	paramsKeeper.Subspace(ibctransfertypes.ModuleName)
+	paramsKeeper.Subspace(ibctransfertypes.ModuleName).WithKeyTable(ibctransfertypes.ParamKeyTable())
 	paramsKeeper.Subspace(ibcexported.ModuleName)
-	paramsKeeper.Subspace(icahosttypes.SubModuleName)
+	paramsKeeper.Subspace(icahosttypes.SubModuleName).WithKeyTable(icahosttypes.ParamKeyTable())
 	paramsKeeper.Subspace(blobtypes.ModuleName)
 	paramsKeeper.Subspace(minfeetypes.ModuleName)
 	paramsKeeper.Subspace(packetforwardtypes.ModuleName)
@@ -768,7 +771,7 @@ func initParamsKeeper(appCodec codec.BinaryCodec, legacyAmino *codec.LegacyAmino
 
 // AutoCliOpts returns the autocli options for the app.
 func (app *App) AutoCliOpts() autocli.AppOptions {
-	modules := make(map[string]appmodule.AppModule, 0)
+	modules := make(map[string]appmodule.AppModule)
 	for _, m := range app.ModuleManager.Modules {
 		if moduleWithName, ok := m.(module.HasName); ok {
 			moduleName := moduleWithName.Name()
@@ -810,19 +813,15 @@ func (app *App) NewProposalContext(header tmproto.Header) sdk.Context {
 	return ctx
 }
 
-// TimeoutCommit returns the timeout commit duration to be used on the next block.
-// It returns the user specified value as overridden by the --timeout-commit flag, otherwise
-// the default timeout commit value for the current app version.
-func (app *App) TimeoutCommit() time.Duration {
-	if app.timeoutCommit != 0 {
-		return app.timeoutCommit
+func (app *App) TimeoutInfo() abci.TimeoutInfo {
+	return abci.TimeoutInfo{
+		TimeoutPropose:          appconsts.TimeoutPropose,
+		TimeoutProposeDelta:     appconsts.TimeoutProposeDelta,
+		TimeoutCommit:           appconsts.TimeoutCommit,
+		TimeoutPrevote:          appconsts.TimeoutPrevote,
+		TimeoutPrevoteDelta:     appconsts.TimeoutPrevoteDelta,
+		TimeoutPrecommit:        appconsts.TimeoutPrecommit,
+		TimeoutPrecommitDelta:   appconsts.TimeoutPrecommitDelta,
+		DelayedPrecommitTimeout: app.delayedPrecommitTimeout,
 	}
-
-	return appconsts.TimeoutCommit
-}
-
-// TimeoutPropose returns the timeout propose duration to be used on the next block.
-// It returns the default timeout propose value for the current app version.
-func (app *App) TimeoutPropose() time.Duration {
-	return appconsts.TimeoutPropose
 }

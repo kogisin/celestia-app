@@ -1,6 +1,10 @@
 package appconsts
 
-import "time"
+import (
+	"time"
+
+	"cosmossdk.io/math"
+)
 
 const (
 	// Version is the current application version.
@@ -15,12 +19,18 @@ const (
 	// SubtreeRootThreshold.
 	//
 	// The rationale for this value is described in more detail in ADR-013.
-	SubtreeRootThreshold int    = 64
-	TxSizeCostPerByte    uint64 = 10
-	GasPerBlobByte       uint32 = 8
-	MaxTxSize            int    = 8_388_608 // 8 MiB in bytes
-	TimeoutPropose              = time.Millisecond * 3500
-	TimeoutCommit               = time.Millisecond * 4200
+	SubtreeRootThreshold    int    = 64
+	TxSizeCostPerByte       uint64 = 10
+	GasPerBlobByte          uint32 = 8
+	MaxTxSize               int    = 8_388_608 // 8 MiB in bytes
+	TimeoutPropose                 = time.Millisecond * 8500
+	TimeoutProposeDelta            = time.Millisecond * 500
+	TimeoutPrevote                 = time.Millisecond * 3000
+	TimeoutPrevoteDelta            = time.Millisecond * 500
+	TimeoutPrecommit               = time.Millisecond * 3000
+	TimeoutPrecommitDelta          = time.Millisecond * 500
+	TimeoutCommit                  = time.Millisecond
+	DelayedPrecommitTimeout        = time.Millisecond * 5850
 
 	// TestUpgradeHeightDelay is the number of blocks that chain-id "test" waits
 	// after a MsgTryUpgrade to activate the next version.
@@ -39,4 +49,18 @@ const (
 	MainnetUpgradeHeightDelay = int64(100_800)
 	// Deprecated: Use MainnetUpgradeHeightDelay instead.
 	UpgradeHeightDelay = MainnetUpgradeHeightDelay
+	// MempoolSize determines the default max mempool size. This is determined
+	// using a multiple of the max possible bytes in a block.
+	MempoolSize = int64(DefaultUpperBoundMaxBytes) * 3
+	// UnbondingTime is the time a validator must wait to unbond in a proof of
+	// stake system. Any validator within this time can be subject to slashing
+	// under conditions of misbehavior.
+	//
+	// Modified from 3 weeks to 14 days + 1 hour in CIP-037.
+	UnbondingTime = 337 * time.Hour // (14 days + 1 hour)
+
 )
+
+// MinCommissionRate is 10%. It is the minimum commission rate for a validator
+// as defined in CIP-41.
+var MinCommissionRate = math.LegacyNewDecWithPrec(1, 1)

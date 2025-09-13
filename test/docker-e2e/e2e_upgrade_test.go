@@ -31,6 +31,34 @@ func (s *CelestiaTestSuite) TestCelestiaAppUpgrade() {
 		targetAppVersion uint64
 	}{
 		{
+			baseAppVersion:   5,
+			targetAppVersion: 6,
+		},
+	}
+
+	for _, tc := range tt {
+		s.Run(fmt.Sprintf("upgrade from v%d to v%d", tc.baseAppVersion, tc.targetAppVersion), func() {
+			s.runUpgradeTest(tag, tc.baseAppVersion, tc.targetAppVersion)
+		})
+	}
+}
+
+// TestAllUpgrades tests all app version upgrades using the signaling mechanism.
+// This test runs all upgrade paths.
+func (s *CelestiaTestSuite) TestAllUpgrades() {
+	if testing.Short() {
+		s.T().Skip("skipping celestia-app TestAllUpgrades in short mode")
+	}
+
+	tag, err := dockerchain.GetCelestiaTagStrict()
+	s.Require().NoError(err)
+
+	// All upgrade paths for comprehensive testing
+	tt := []struct {
+		baseAppVersion   uint64
+		targetAppVersion uint64
+	}{
+		{
 			baseAppVersion:   2,
 			targetAppVersion: 3,
 		},
@@ -41,6 +69,10 @@ func (s *CelestiaTestSuite) TestCelestiaAppUpgrade() {
 		{
 			baseAppVersion:   4,
 			targetAppVersion: 5,
+		},
+		{
+			baseAppVersion:   5,
+			targetAppVersion: 6,
 		},
 	}
 
@@ -81,6 +113,9 @@ func (s *CelestiaTestSuite) runUpgradeTest(ImageTag string, baseAppVersion, targ
 	s.T().Log("Testing bank send functionality before upgrade")
 	testBankSend(s.T(), chain, cfg)
 
+	s.T().Log("Testing PFB submission functionality before upgrade")
+	testPFBSubmission(s.T(), chain, cfg)
+
 	validatorNode := chain.GetNodes()[0]
 	rpcClient, err := validatorNode.GetRPCClient()
 	s.Require().NoError(err, "failed to get RPC client")
@@ -97,15 +132,15 @@ func (s *CelestiaTestSuite) runUpgradeTest(ImageTag string, baseAppVersion, targ
 	// Signal for upgrade and get the upgrade height
 	upgradeHeight := s.signalAndGetUpgradeHeight(ctx, chain, validatorNode, cfg, records, targetAppVersion)
 
-	// Get current height
+	// Record start height - we'll use it later for health assertions
 	status, err := rpcClient.Status(ctx)
 	s.Require().NoError(err, "failed to get node status")
-	currentHeight := status.SyncInfo.LatestBlockHeight
+	startHeight := status.SyncInfo.LatestBlockHeight
 
-	s.T().Logf("Current height: %d, Upgrade height: %d", currentHeight, upgradeHeight)
+	s.T().Logf("Start height: %d, Upgrade height: %d", startHeight, upgradeHeight)
 
 	// Wait until we reach the upgrade height
-	blocksToWait := int(upgradeHeight-currentHeight) + 2 // Add buffer
+	blocksToWait := int(upgradeHeight-startHeight) + 2 // Add buffer
 	s.T().Logf("Waiting for %d blocks to reach upgrade height plus buffer", blocksToWait)
 	s.Require().NoError(wait.ForBlocks(ctx, blocksToWait, chain))
 
@@ -119,6 +154,15 @@ func (s *CelestiaTestSuite) runUpgradeTest(ImageTag string, baseAppVersion, targ
 	// Sanity check: Test bank send after upgrade
 	s.T().Log("Testing bank send functionality after upgrade")
 	testBankSend(s.T(), chain, cfg)
+
+	s.T().Log("Testing PFB submission functionality after upgrade")
+	testPFBSubmission(s.T(), chain, cfg)
+
+	s.T().Logf("Checking validator liveness from height %d with minimum %d blocks per validator", startHeight, defaultBlocksPerValidator)
+	s.Require().NoError(
+		s.CheckLiveness(ctx, chain),
+		"validator liveness check failed",
+	)
 }
 
 // signalAndGetUpgradeHeight signals for an upgrade to the specified app

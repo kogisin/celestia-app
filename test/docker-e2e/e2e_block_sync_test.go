@@ -3,12 +3,14 @@ package docker_e2e
 import (
 	"celestiaorg/celestia-app/test/docker-e2e/dockerchain"
 	"context"
+	tastoratypes "github.com/celestiaorg/tastora/framework/types"
+	"testing"
+	"time"
+
 	addressutil "github.com/celestiaorg/tastora/framework/testutil/address"
 	"github.com/celestiaorg/tastora/framework/testutil/config"
 	cometcfg "github.com/cometbft/cometbft/config"
 	rpctypes "github.com/cometbft/cometbft/rpc/core/types"
-	"testing"
-	"time"
 
 	celestiadockertypes "github.com/celestiaorg/tastora/framework/docker"
 	"github.com/celestiaorg/tastora/framework/testutil/wait"
@@ -69,6 +71,7 @@ func (s *CelestiaTestSuite) TestBlockSync() {
 
 	// build peer list for the new node to connect to existing validators
 	peerList, err := addressutil.BuildInternalPeerAddressList(ctx, celestia.GetNodes())
+	s.Require().NoError(err, "failed to build peer address list")
 
 	t.Logf("Latest height: %d", latestHeight)
 	t.Logf("Peers: %s", peerList)
@@ -76,7 +79,7 @@ func (s *CelestiaTestSuite) TestBlockSync() {
 	t.Log("Adding block sync node")
 	err = celestia.AddNode(ctx,
 		celestiadockertypes.NewChainNodeConfigBuilder().
-			WithNodeType(celestiadockertypes.FullNodeType).
+			WithNodeType(tastoratypes.NodeTypeConsensusFull).
 			WithPostInit(func(ctx context.Context, node *celestiadockertypes.ChainNode) error {
 				return config.Modify(ctx, node, "config/config.toml", func(cfg *cometcfg.Config) {
 					// disable state sync to ensure we're testing block sync
@@ -95,7 +98,7 @@ func (s *CelestiaTestSuite) TestBlockSync() {
 	allNodes = celestia.GetNodes()
 	blockSyncNode := allNodes[len(allNodes)-1]
 
-	s.Require().Equal("fn", blockSyncNode.GetType(), "expected block sync node to be a full node")
+	s.Require().Equal(tastoratypes.NodeTypeConsensusFull, blockSyncNode.GetType(), "expected block sync node to be a full node")
 
 	blockSyncClient, err := blockSyncNode.GetRPCClient()
 	s.Require().NoError(err)
@@ -106,4 +109,9 @@ func (s *CelestiaTestSuite) TestBlockSync() {
 
 	s.Require().NoError(err, "failed to wait for block sync node to catch up")
 
+	s.T().Logf("Checking validator liveness from height %d", initialHeight)
+	s.Require().NoError(
+		s.CheckLiveness(ctx, celestia),
+		"validator liveness check failed",
+	)
 }
