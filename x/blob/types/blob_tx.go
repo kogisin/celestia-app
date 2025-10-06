@@ -2,11 +2,12 @@ package types
 
 import (
 	"bytes"
+	"runtime"
 	"slices"
 
-	"github.com/celestiaorg/go-square/v2/inclusion"
-	"github.com/celestiaorg/go-square/v2/share"
-	"github.com/celestiaorg/go-square/v2/tx"
+	"github.com/celestiaorg/go-square/v3/inclusion"
+	"github.com/celestiaorg/go-square/v3/share"
+	"github.com/celestiaorg/go-square/v3/tx"
 	"github.com/cometbft/cometbft/crypto/merkle"
 	"github.com/cosmos/cosmos-sdk/client"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -102,12 +103,12 @@ func ValidateBlobTx(txcfg client.TxEncodingConfig, bTx *tx.BlobTx, subtreeRootTh
 	}
 
 	// verify that the commitment of the blob matches that of the msgPFB
+	calculatedCommitments, err := inclusion.CreateParallelCommitments(bTx.Blobs, merkle.HashFromByteSlices, subtreeRootThreshold, runtime.NumCPU()*2)
+	if err != nil {
+		return ErrCalculateCommitment
+	}
 	for i, commitment := range msgPFB.ShareCommitments {
-		calculatedCommit, err := inclusion.CreateCommitment(bTx.Blobs[i], merkle.HashFromByteSlices, subtreeRootThreshold)
-		if err != nil {
-			return ErrCalculateCommitment
-		}
-		if !bytes.Equal(calculatedCommit, commitment) {
+		if !bytes.Equal(calculatedCommitments[i], commitment) {
 			return ErrInvalidShareCommitment
 		}
 	}
